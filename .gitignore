@@ -1,0 +1,12 @@
+# arduino-cli build output
+PS5-Server-Pico/PS5_Server_Pico/build/
+
+# generated site mirror - re-crawl with fetch_sites.py rather than committing
+# 1.7 MB of someone else's HTML. payloads.h (the gzipped result) IS committed,
+# so a fresh clone can build the firmware immediately.
+/embedded/sites/
+/embedded/build/
+
+__pycache__/
+*.pyc
+.DS_Store
