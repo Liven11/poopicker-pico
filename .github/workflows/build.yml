@@ -53,6 +53,7 @@ jobs:
           arduino-cli compile \
             -b rp2040:rp2040:rpipico2w:flash=4194304_131072 \
             --warnings all \
+            --export-binaries \
             PS5-Server-Pico/PS5_Server_Pico
 
       - name: Upload the UF2
