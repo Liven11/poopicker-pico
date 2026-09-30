@@ -16,27 +16,80 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Manual re-runs publish to an existing tag, given as v0.1.0. A bare ref
+  # creates a confusing half-tagged run where the release and the tag disagree.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to publish a release for (e.g. v0.1.0)'
+        description: 'Tag to publish, without the v (e.g. 0.1.0)'
         required: true
 
 permissions:
   contents: read
 
 jobs:
+  # Resolves which tag is being released, once, so build/release/provenance all
+  # agree. Without this the release name comes from the tag push while a manual
+  # run has to be told, and the two paths drift apart.
+  tag:
+    name: Resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.resolve.outputs.name }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Work out the tag
+        id: resolve
+        env:
+          # Refs are not interpolated into shell; the tag reaches bash as a
+          # plain environment variable.
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            raw="${INPUT_TAG:-}"
+            raw="${raw#v}"                       # accept 0.1.0 or v0.1.0
+            if [ -z "$raw" ]; then
+              echo "::error::the 'tag' input is required"
+              exit 1
+            fi
+            name="v$raw"
+            ref="refs/tags/$name"
+            # Checked through the API rather than `git ls-remote`, because this
+            # job deliberately does no checkout, so there is no origin remote to
+            # ask. Fails here, with an instruction, instead of after a full build.
+            if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$name" >/dev/null 2>&1; then
+              echo "::error::tag $name does not exist. Create it first:"
+              echo "  git tag -a $name -m '...' && git push origin $name"
+              exit 1
+            fi
+          else
+            name="${HEAD_REF#refs/tags/}"
+            ref="$HEAD_REF"
+          fi
+          echo "Releasing $name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build
     runs-on: ubuntu-latest
+    needs: tag
     # No `permissions` block of its own: inherits read-only. The release job is
     # the only one that needs write.
     outputs:
       base64-subjects: ${{ steps.subjects.outputs.base64-subjects }}
-
+      sha: ${{ steps.checkout.outputs.commit }}
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Build the tagged commit, not the ref that triggered the run. These
+          # differ on a manual re-run of a workflow_dispatch.
+          ref: ${{ needs.tag.outputs.ref }}
 
       - name: Install arduino-cli
         uses: arduino/setup-arduino-cli@7ef629dcdf0f458ab7ae83149d629443deac6eac # v2.0.0
@@ -93,7 +146,7 @@ jobs:
   release:
     name: Publish release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [tag, build]
     permissions:
       contents: write
     steps:
@@ -103,12 +156,24 @@ jobs:
           name: release-uf2
           path: dist
 
+      # Published, not draft, and named/tagged explicitly rather than inferred.
+      #
+      # A draft release is invisible to the SLSA generator's tag lookup, so a
+      # draft here means provenance attaches to nothing. And on the first
+      # attempt this run produced two releases for one tag: a draft from this
+      # job and an empty second one from the generator, both for v0.1.0. Naming
+      # the tag here makes both steps target the same release.
+      #
+      # target_commitish is the resolved commit, so the release always points at
+      # the code that was built even on a manual re-run.
       - name: Create the GitHub release
         uses: softprops/action-gh-release@e598afbe1493e6b1bafb1f389cabb956eab91231 # v3.0.3
         with:
           files: dist/PS5_Server_Pico.uf2
-          draft: true
-          generate_release_notes: true
+          generate_release_notes: false
+          name: ${{ needs.tag.outputs.name }}
+          tag_name: ${{ needs.tag.outputs.name }}
+          target_commitish: ${{ needs.build.outputs.sha }}
           body: |
             ## Flash it
 
@@ -128,7 +193,7 @@ jobs:
 
   provenance:
     name: SLSA provenance
-    needs: [build, release]
+    needs: [tag, build, release]
     permissions:
       actions: read       # the generator reads workflow run info
       id-token: write     # keyless OIDC signing
@@ -137,4 +202,11 @@ jobs:
     with:
       base64-subjects: ${{ needs.build.outputs.base64-subjects }}
       upload-assets: true
-      provenance-name: PS5_Server_Pico.intoto.jsonl
+      # Required on a manual run: the generator's own tag lookup is gated on
+      # startsWith(github.ref, 'refs/tags/'), which is false for a
+      # workflow_dispatch, so without this it would silently skip uploading.
+      upload-tag-name: ${{ needs.tag.outputs.name }}
+      # No provenance-name: the generator derives the filename from the subject
+      # and reports it via the provenance-name output. Setting it explicitly left
+      # needs.generator.outputs.provenance-name empty in upload-assets, and an
+      # empty path there fails the artifact download.
