@@ -1,0 +1,64 @@
+# Builds the firmware and runs the resolver tests.
+#
+# Pinned to a full commit SHA rather than a tag: this is a public repo that
+# ships a binary people flash onto hardware, so the build's own dependencies
+# should not be able to move under it. Dependabot keeps the SHAs current.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only for the whole workflow. Nothing here needs to write back.
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@7ef629dcdf0f458ab7ae83149d629443deac6eac # v2.0.0
+        with:
+          version: 1.x
+
+      # arduino-pico is distributed from its own index, not the Arduino one.
+      - name: Add the arduino-pico board index
+        run: |
+          arduino-cli config set board_manager.additional_urls \
+            https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+
+      - name: Install the RP2350 core
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install rp2040:rp2040@6.1.1
+
+      # Catches the resolver regressing without waiting for a release.
+      - name: Test path resolution
+        run: python3 embedded/tools/test_resolve.py
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            -b rp2040:rp2040:rpipico2w:flash=4194304_131072 \
+            --warnings all \
+            PS5-Server-Pico/PS5_Server_Pico
+
+      - name: Upload the UF2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: PS5_Server_Pico.uf2
+          path: PS5-Server-Pico/PS5_Server_Pico/build/rp2040.rp2040.rpipico2w/PS5_Server_Pico.ino.uf2
+          if-no-files-found: error
+          retention-days: 30

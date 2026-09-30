@@ -1,0 +1,12 @@
+# Keeps the pinned action SHAs in .github/workflows current. They are pinned to
+# full commits on purpose (this repo ships a binary people flash onto a
+# console), so Dependabot has to open the PRs that move them forward.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels: [dependencies]

@@ -83,6 +83,23 @@ LittleFS uploader for those instead.
 Replays real console request shapes against the firmware's resolver logic —
 guide prefixes, query strings, subdirectories, path traversal — 20 cases.
 
+Both run in CI on every push and PR.
+
+## Releases
+
+Tag a `v*` and the release workflow builds, publishes the UF2 as a **draft**
+release, and attaches [SLSA Level 3](https://slsa.dev) provenance:
+
+    git tag v0.1.0 && git push origin v0.1.0
+
+Provenance is signed with GitHub's OIDC key — no long-lived signing key to leak
+or rotate — and lets someone confirm the UF2 in a release came from this repo at
+that tag, which matters more than usual when the artifact decides which exploit
+runs on a console.
+
+It attests to the *build*, not to the chain working on hardware. Draft releases
+are deliberate: review the notes before publishing.
+
 ## Caveat
 
 **This has been compiled and its path routing tested, but it has not been
