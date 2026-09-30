@@ -48,7 +48,10 @@ int WEB_PORT = 80;
 int USB_WAIT = 10000;
 
 //-----------------------------------------------------//
-#include "pages.h"
+// Capital P matches the file on disk. The lowercase spelling compiled on macOS
+// (case-insensitive APFS) and failed on a case-sensitive filesystem, which is
+// how it reached CI.
+#include "Pages.h"
 
 
 String split(String str, String from, String to) {
